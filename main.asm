@@ -118,6 +118,9 @@ CPU_EntryPoint:
 	
 	; Load the initial VDP registers
 	jsr VDP_LoadRegisters
+	
+	; Init gamepads
+	jsr PAD_Init
 
 	; Clear VRAM
 	SetVRAMWrite 0x0000
@@ -340,9 +343,13 @@ Input:
 	andi.l #0xFF, d6
 	lsl.l  #0x3, d6					; 2x longs(X/Y)  per table entry
 	lea    ang2vec1616_table, a0
+	lea    ang2vec1616_table_90, a1
 	add.l  d6, a0
+	add.l  d6, a1
 	move.l (a0)+, d4				; X direction
 	move.l (a0)+, d5				; Y direction
+	move.l (a1)+, d6				; X direction +90 deg
+	move.l (a1)+, d7				; Y direction +90 deg
 
 	btst   #pad_button_up, d0
 	bne    @NoUp
@@ -350,22 +357,22 @@ Input:
 	sub.l  d5, d3
 	@NoUp:
 
-	btst   #pad_button_a, d0
-	bne    @NoA
-	sub.l  d4, d2					; Move forward
-	sub.l  d5, d3
-	@NoA:
-
 	btst   #pad_button_down, d0
 	bne    @NoDown
 	add.l  d4, d2					; Move backward
 	add.l  d5, d3
 	@NoDown:
+	
+	btst   #pad_button_a, d0
+	bne    @NoA
+	add.l  d6, d2					; Strafe left
+	add.l  d7, d3
+	@NoA:
 
 	btst   #pad_button_b, d0
 	bne    @NoB
-	add.l  d4, d2					; Move backward
-	add.l  d5, d3
+	sub.l  d6, d2					; Strafe right
+	sub.l  d7, d3
 	@NoB:
 
 	; Clamp player pos to map bounds
