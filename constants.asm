@@ -41,8 +41,8 @@ size_long				equ 4
 
 ; The size of one palette (in bytes, words, and longwords)
 size_palette_b			equ 0x10
-size_palette_w			equ size_palette_b*2
-size_palette_l			equ size_palette_b*4
+size_palette_w			equ size_palette_b/2
+size_palette_l			equ size_palette_b/4
 
 ; The size of one graphics tile (in bytes, words, and longwords)
 size_tile_b				equ 0x20

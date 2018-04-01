@@ -6,8 +6,10 @@
 ;   An experimental first-person shooter for SEGA Mega Drive
 ;==============================================================
 
-	; Palette
-Palette:
+Palettes:
+
+	; Wall palettes
+PaletteWall1:
 	dc.w 0x0000	; Transparent
 	dc.w 0x0EEE	; White
 	dc.w 0x0CCC	; Grey light
@@ -16,6 +18,24 @@ Palette:
 	dc.w 0x0666	; ...
 	dc.w 0x0444	; ...
 	dc.w 0x0222	; Grey dark
+	dc.w 0x0000	; Black
+	dc.w 0x0000
+	dc.w 0x0000
+	dc.w 0x0000
+	dc.w 0x0000
+	dc.w 0x0000
+	dc.w 0x0000
+	dc.w 0x0000
+
+PaletteWall2:
+	dc.w 0x0000	; Transparent
+	dc.w 0x0E00	; White
+	dc.w 0x0C00	; Grey light
+	dc.w 0x0A00	; ...
+	dc.w 0x0800	; ...
+	dc.w 0x0600	; ...
+	dc.w 0x0400	; ...
+	dc.w 0x0200	; Grey dark
 	dc.w 0x0000	; Black
 	dc.w 0x0000
 	dc.w 0x0000

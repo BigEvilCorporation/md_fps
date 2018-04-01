@@ -17,7 +17,8 @@ ROM_Start
 	include 'palettes.asm'
 	include 'cols.asm'
 	include 'map.asm'
-	include 'ang2vec.asm'
+	include 'angvec.asm'
+	include 'angvec90.asm'
 	include 'gamepad.asm'
 	
 ;==============================================================
@@ -30,10 +31,13 @@ TestColumnHeights2:
 	dc.b 0,1,2,3,4,5,6,7,40,40,40,40,40,40,14,15,16,17,18,19,20,19,18,17,16,15,14,20,21,22,23,24,25,7,6,5,4,3,2,1,0
 	even
 
-fisheye_fudge:
-	dc.b 0,1,2,3,4,5,6,7,8,8,8,8,8,9,9,10,10,10,10,10,10,10,10,10,10,9,9,8,8,8,8,8,7,6,5,4,3,2,1,0
+; Angle offsets to check along camera plane
+; 1D "fisheye" curve
+camera_plane_angles:
+	dc.w 0xFFEF, 0xFFF0, 0xFFF0, 0xFFF0, 0xFFF1, 0xFFF1, 0xFFF2, 0xFFF2, 0xFFF3, 0xFFF3, 0xFFF4, 0xFFF5, 0xFFF6, 0xFFF7, 0xFFF8, 0xFFFA, 0xFFFB, 0xFFFD, 0xFFFE, 0x0000, 0x0000, 0x0002, 0x0003, 0x0005, 0x0006, 0x0008, 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x000D, 0x000E, 0x000E, 0x000F, 0x000F, 0x0010, 0x0010, 0x0010, 0x0011
 
-num_palettes			equ 2
+max_angle				equ 4096	; Must be power-of-two
+num_palettes			equ 3
 num_tiles				equ 10
 bg_palette_max_shades	equ 6
 visibility_plane_size	equ (vdp_screen_width/8)*(vdp_screen_height/8)
@@ -46,13 +50,15 @@ raycast_check_step		equ 0x00008000				; Check very half grid square for wall
 cam_plane_width			equ (vdp_screen_width/8)	; Camera plane width (num draw columns)
 
 ; Movement
-player_turn_speed		equ 0x4<<8
+player_move_speed		equ 0x00010000
+player_turn_speed		equ 0x0018
 
 ;==============================================================
 
 ; Memory map (named offsets from start of RAM)
 	rsset 0x00FF0000
 ram_column_height_idxs	rs.b cam_plane_width
+ram_column_palette_idxs	rs.b cam_plane_width
 ram_vblank_counter		rs.l 1
 ram_player_pos_x		rs.l 1
 ram_player_pos_y		rs.l 1
@@ -64,13 +70,14 @@ Raycast:
 	; d0 (l) X pos
 	; d1 (l) Y pos
 	; d2 (b) Angle
+	; d2 (b) OUT: Wall type
 	; d3 (l) OUT: distance to wall, or 0
 
 	; Init distance
 	moveq  #0x0, d3
 
 	; Get direction from angle table
-	andi.l #0xFF, d2
+	andi.l #(max_angle-1), d2
 	lsl.l  #0x3, d2		; 2x longs(X/Y)  per table entry
 	lea    ang2vec1616_table, a0
 	add.l  d2, a0
@@ -89,7 +96,7 @@ Raycast:
 	add.w  d0, d1			; + X
 	lea    map, a2			; Get map
 	add.l  d1, a2			; Add offset
-	move.b (a2), d4			; Get map cell
+	move.b (a2), d2			; Get map cell
 	POPM   d0-d1
 
 	; Increment distance
@@ -99,8 +106,11 @@ Raycast:
 	add.l  d4, d0
 	add.l  d5, d1
 
-	tst.b  d4				; Check if hit wall
+	tst.b  d2				; Check if hit wall
 	beq    @RaycastLp
+
+	; Wall type 0-based
+	subi.b #0x1, d2
 
 	rts
 
@@ -140,7 +150,7 @@ CPU_EntryPoint:
 	;==============================================================
 	move.l #(map_width/2)<<16, ram_player_pos_x
 	move.l #(map_height/2)<<16, ram_player_pos_y
-	move.b #0x0, ram_player_angle
+	move.w #0x0, ram_player_angle
 
 	; Write test data
 	lea    ram_column_height_idxs, a0
@@ -235,7 +245,7 @@ CPU_EntryPoint:
 	SetCRAMWrite 0x0000
 	
 	; Write the palettes
-	lea    Palette, a0				; Move palette address to a0
+	lea    Palettes, a0				; Move palette address to a0
 	move.w #(num_palettes*size_palette_w)-1, d0	; Loop counter = 8 words in palette (-1 for DBRA loop)
 	@PalLp:							; Start of loop
 	move.w (a0)+, vdp_data			; Write palette entry, post-increment address
@@ -273,7 +283,7 @@ CPU_EntryPoint:
 	move.w #(vdp_screen_width/8/2), d4		; Invert row counter for shade idx
 	sub.w  d2, d4
 	CLAMPW d4,#0x0,#bg_palette_max_shades	; Clamp to max gradiant shades in palette
-	move.w #(1<<13), d3						; Palette
+	move.w #(2<<13), d3						; Palette
 	move.b d4, d3							; Tile ID
 
 	; Top half of screen
@@ -323,24 +333,28 @@ CPU_EntryPoint:
 Input:
 
 	jsr    PAD_ReadPadA
+	
+	move.w ram_player_angle, d2
 
 	btst   #pad_button_left, d0
-	bne    @NoLeft
-	addi.w #player_turn_speed, ram_player_angle	; Turn left
+	beq    @NoLeft
+	subi.w #player_turn_speed, d2	; Turn left
 	@NoLeft:
 
 	btst   #pad_button_right, d0
-	bne    @NoRight
-	subi.w #player_turn_speed, ram_player_angle	; Turn right
+	beq    @NoRight
+	addi.w #player_turn_speed, d2	; Turn right
 	@NoRight:
+	
+	move.w d2, ram_player_angle
 
 	; Get player pos
 	move.l ram_player_pos_x, d2
 	move.l ram_player_pos_y, d3
 
 	; Get direction from angle table
-	move.b ram_player_angle, d6
-	andi.l #0xFF, d6
+	move.w ram_player_angle, d6
+	andi.l #(max_angle-1), d6		; Mod
 	lsl.l  #0x3, d6					; 2x longs(X/Y)  per table entry
 	lea    ang2vec1616_table, a0
 	lea    ang2vec1616_table_90, a1
@@ -351,28 +365,57 @@ Input:
 	move.l (a1)+, d6				; X direction +90 deg
 	move.l (a1)+, d7				; Y direction +90 deg
 
+	; Mul by move speed
+	PUSHM  d0-d3/d5-d7
+	move.l d4, d0
+	move.l #player_move_speed, d1
+	jsr    Muls1616
+	move.l d0, d4
+	POPM   d0-d3/d5-d7
+
+	PUSHM  d0-d4/d6-d7
+	move.l d5, d0
+	move.l #player_move_speed, d1
+	jsr    Muls1616
+	move.l d0, d5
+	POPM   d0-d4/d6-d7
+
+	PUSHM  d0-d5/d7
+	move.l d6, d0
+	move.l #player_move_speed, d1
+	jsr    Muls1616
+	move.l d0, d6
+	POPM   d0-d5/d7
+
+	PUSHM  d0-d6
+	move.l d7, d0
+	move.l #player_move_speed, d1
+	jsr    Muls1616
+	move.l d0, d7
+	POPM   d0-d6
+
 	btst   #pad_button_up, d0
-	bne    @NoUp
-	sub.l  d4, d2					; Move forward
-	sub.l  d5, d3
+	beq    @NoUp
+	add.l  d4, d2					; Move forward
+	add.l  d5, d3
 	@NoUp:
 
 	btst   #pad_button_down, d0
-	bne    @NoDown
-	add.l  d4, d2					; Move backward
-	add.l  d5, d3
+	beq    @NoDown
+	sub.l  d4, d2					; Move backward
+	sub.l  d5, d3
 	@NoDown:
 	
 	btst   #pad_button_a, d0
-	bne    @NoA
-	add.l  d6, d2					; Strafe left
-	add.l  d7, d3
+	beq    @NoA
+	sub.l  d6, d2					; Strafe left
+	sub.l  d7, d3
 	@NoA:
 
 	btst   #pad_button_b, d0
-	bne    @NoB
-	sub.l  d6, d2					; Strafe right
-	sub.l  d7, d3
+	beq    @NoB
+	add.l  d6, d2					; Strafe right
+	add.l  d7, d3
 	@NoB:
 
 	; Clamp player pos to map bounds
@@ -395,23 +438,23 @@ Process:
 	; Get player pos and angle
 	move.l ram_player_pos_x, d0
 	move.l ram_player_pos_y, d1
-	move.b ram_player_angle, d2
+	move.w ram_player_angle, d6
 
-	; Search from angle-(screen_width/2) to angle+(screen_width/2)
-	sub.b  #cam_plane_width/2, d2
+	; Search through plane angles
 	move.w #cam_plane_width-1, d3
-	lea    fisheye_fudge, a5
+	lea    camera_plane_angles, a5
 	lea    ram_column_height_idxs, a6
+	lea    ram_column_palette_idxs, a4
 	@RaycastLp:
+	move.w d6, d2		; Reset to centre
+	add.w  (a5)+, d2	; Next camera plane angle
 	PUSHM  d0-d3
 	jsr    Raycast		; Raycast from player pos towards angle
 	swap   d3			; Wall distance to array
-	lsl.w  #0x1, d3		; Scale wall
-	;add.b  (a5)+, d3	; Correct for fisheye
 	CLAMPW d3, #0x0, #max_draw_distance-1	; Clamp distance
-	move.b d3, (a6)+
+	move.b d3, (a6)+	; Write wall height
+	move.b d2, (a4)+	; Write wall type (palette)
 	POPM   d0-d3
-	addi.b #0x1, d2		; Next angle
 	dbra   d3, @RaycastLp
 	
 	rts
@@ -422,6 +465,8 @@ Output:
 
 	; Loop columns
 	lea    ram_column_height_idxs, a0	; Get column map from RAM
+	lea    ram_column_palette_idxs, a2	; Get column palette map from RAM
+
 COL_INDEX = 0
 	REPT   (vdp_screen_width/8)
 	moveq  #0x0, d0
@@ -430,11 +475,17 @@ COL_INDEX = 0
 	lea    Columns, a1					; Get columns
 	add.l  d0, a1						; Add offset
 
+	move.b (a2)+, d2					; Fetch palette ID
+	andi.w #0x3, d2						; Palette to bits 14-13
+	ror.w  #0x3, d2
+
 	; Loop rows
 ROW_INDEX = 0
 	REPT   column_draw_height
 	SetVRAMWrite vram_addr_plane_a+(vdp_plane_width*ROW_INDEX*size_word)+(COL_INDEX*size_word)	; Get column dest address in VRAM
-	move.w (a1)+, vdp_data	; Write cell idx word
+	move.w (a1)+, d1				; Fetch tile ID
+	or.w   d2, d1					; Add palette ID
+	move.w d1, vdp_data				; Write cell idx word
 ROW_INDEX = ROW_INDEX+1
 	ENDR
 
@@ -443,6 +494,7 @@ ROW_INDEX = ROW_INDEX+1
 	SetVRAMWrite vram_addr_plane_a+(vdp_plane_width*ROW_INDEX*size_word)+(COL_INDEX*size_word)	; Get column dest address in VRAM
 	move.w -(a1), d1				; Get tile idx
 	ori.w  #%0001000000000000, d1	; Flip Y
+	or.w   d2, d1					; Add palette ID
 	move.w d1, vdp_data				; Write cell idx word
 ROW_INDEX = ROW_INDEX+1
 	ENDR
